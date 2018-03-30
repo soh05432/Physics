@@ -1,7 +1,8 @@
-#include <Base.h>
+#include <Common/Base.h>
 
-#include <Renderer.h>
-#include <FileIO.h>
+#include <Renderer/Renderer.h>
+#include <Renderer/Shader.h>
+#include <Common/FileIO.h>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -18,48 +19,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-std::vector<class Line> g_renderLines;
-std::vector<class Text> g_renderTexts;
-
-// For drawing lines
-static GLuint g_lineProgramID = 0;
-static GLuint g_lineVAO = 0;
-static GLuint g_lineVBO[2] = { 0 };
-
-// For drawing text
-static GLuint g_txtProgramID = 0;
-static GLuint g_txtVAO = 0;
-static GLuint g_txtVBO = { 0 };
-
-static int g_left;
-static int g_right;
-static int g_bottom;
-static int g_top;
-static glm::mat4 g_projection;
-
-class Line
-{
-public:
-
-	Line( const Vector4& pointA, const Vector4& pointB, unsigned int color = BLACK);
-	void render() const;
-
-	Vector4 m_pointA, m_pointB;
-	unsigned int m_color;
-};
-
-class Text
-{
-public:
-
-	Text( const std::string& str, const Vector4& pos, const Real scale = 1.f, unsigned int color = BLACK);
-	void render() const;
-
-	std::string m_str;
-	Vector4 m_pos;
-	Real m_scale;
-	unsigned int m_color;
-};
+typedef Renderer::Line Line;
+typedef Renderer::Text Text;
 
 inline unsigned int SetRGBA( unsigned char r, unsigned char g, unsigned char b, unsigned char a )
 {
@@ -200,10 +161,10 @@ int initializeFreeType()
 	glEnable( GL_BLEND );
 	glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 
-	glGenVertexArrays( 1, &g_txtVAO );
-	glGenBuffers( 1, &g_txtVBO );
-	glBindVertexArray( g_txtVAO );
-	glBindBuffer( GL_ARRAY_BUFFER, g_txtVBO );
+	glGenVertexArrays( 1, &m_textVAO );
+	glGenBuffers( 1, &m_textVBO );
+	glBindVertexArray( m_textVAO );
+	glBindBuffer( GL_ARRAY_BUFFER, m_textVBO );
 	glBufferData( GL_ARRAY_BUFFER, sizeof( GLfloat ) * 6 * 4, nullptr, GL_DYNAMIC_DRAW );
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer( 0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof( GL_FLOAT ), 0 );
@@ -213,73 +174,60 @@ int initializeFreeType()
 	return 0;
 }
 
-int initRenderer( int width, int height )
+Renderer::Renderer()
+{
+
+}
+
+int Renderer::initRenderer( int width, int height )
 {
 	GLenum err = glewInit();
 	Assert( err == GLEW_OK, "failed to initialize glew" );
 
-	g_left = -width * 0.5;
-	g_right = width * 0.8;
-	g_bottom = -height * 0.5;
-	g_top = height * 0.8;
-	g_projection = glm::ortho( ( float )g_left, ( float )g_right, ( float )g_bottom, ( float )g_top );
+	m_left = -width * 0.5;
+	m_right = width * 0.8;
+	m_bottom = -height * 0.5;
+	m_top = height * 0.8;
+	m_projection = glm::ortho( ( float )m_left, ( float )m_right, ( float )m_bottom, ( float )m_top );
 
-#if defined FREETYPE_TEST
-	g_lineProgramID = LoadShaders( "../Physics/VertexShader.shader", "../Physics/FragmentShader.shader" );
-#else
-	g_lineProgramID = LoadShaders( "VertexShader.shader", "FragmentShader.shader" );
-#endif
+	m_lineShader = Shader( "../Renderer/VertexShader.shader", "../Renderer/FragmentShader.shader" );
 
-	glGenVertexArrays( 1, &g_lineVAO );
-	glGenBuffers( 2, g_lineVBO );
-	glBindVertexArray( g_lineVAO );
+	glGenVertexArrays( 1, &m_lineVAO );
+	glGenBuffers( 2, m_lineVBO );
+	glBindVertexArray( m_lineVAO );
 
-	glBindBuffer( GL_ARRAY_BUFFER, g_lineVBO[0] );
+	glBindBuffer( GL_ARRAY_BUFFER, m_lineVBO[0] );
 	glBufferData( GL_ARRAY_BUFFER, sizeof( GL_FLOAT ) * 4, nullptr, GL_DYNAMIC_DRAW );
 	glEnableVertexAttribArray( 0 );
 	glVertexAttribPointer( 0, 2, GL_FLOAT, GL_FALSE, 0, nullptr );
 	
-	glBindBuffer( GL_ARRAY_BUFFER, g_lineVBO[1] );
+	glBindBuffer( GL_ARRAY_BUFFER, m_lineVBO[1] );
 	glBufferData( GL_ARRAY_BUFFER, sizeof( GL_FLOAT ) * 8, nullptr, GL_DYNAMIC_DRAW );
 	glEnableVertexAttribArray( 1 );
 	glVertexAttribPointer( 1, 4, GL_FLOAT, GL_FALSE, 0, nullptr );
 
 	glBindVertexArray( 0 );
 
-#if defined FREETYPE_TEST
-	g_txtProgramID = LoadShaders( "../Physics/TextVertexShader.shader", "../Physics/TextFragmentShader.shader" );
-#else
-	g_txtProgramID = LoadShaders( "TextVertexShader.shader", "TextFragmentShader.shader" );
-#endif
+	m_textShader = Shader( "../Renderer/TextVertexShader.shader", "../Renderer/TextFragmentShader.shader" );
 
 	//initializeFreeType();
 
 	return 0;
 }
 
-int closeRenderer()
+int Renderer::stepRenderer()
 {
-	glDeleteProgram( g_lineProgramID );
-	glDeleteProgram( g_txtProgramID );
-
-	return 0;
-}
-
-int stepRenderer()
-{
-	for ( int i = 0; i < (int)g_renderLines.size(); i++ )
+	for ( auto i = 0; i < m_renderLines.size(); i++ )
 	{
-		g_renderLines[i].render();
+		renderLine( m_renderLines[i] );
 	}
+	m_renderLines.clear();
 
-	g_renderLines.clear();
-
-	for ( int i = 0; i < (int)g_renderTexts.size(); i++ )
+	for ( auto i = 0; i < m_renderTexts.size(); i++ )
 	{
-		g_renderTexts[i].render();
+		renderText( m_renderTexts[i] );
 	}
-
-	g_renderTexts.clear();
+	m_renderTexts.clear();
 
 	return 0;
 }
@@ -290,58 +238,52 @@ Line::Line( const Vector4& pointA, const Vector4& pointB, unsigned int color )
 
 }
 
-void Line::render() const
+void Renderer::renderLine( const Line& line ) const
 {
 	GLfloat vertices[] =
 	{
-		m_pointA( 0 ), m_pointA( 1 ), m_pointB( 0 ), m_pointB( 1 )
+		line.m_pointA( 0 ), line.m_pointA( 1 ), line.m_pointB( 0 ), line.m_pointB( 1 )
 	};
 
 	GLfloat color[] =
 	{
-		(GLfloat)(m_color & 0xff) / 255.f,
-		(GLfloat)((m_color >> 8) & 0xff) / 255.f,
-		(GLfloat)((m_color >> 16) & 0xff) / 255.f,
-		(GLfloat)((m_color >> 24) & 0xff) / 255.f,
-		(GLfloat)(m_color & 0xff) / 255.f,
-		(GLfloat)((m_color >> 8) & 0xff) / 255.f,
-		(GLfloat)((m_color >> 16) & 0xff) / 255.f,
-		(GLfloat)((m_color >> 24) & 0xff) / 255.f
+		( GLfloat ) ( line.m_color & 0xff ) / 255.f,
+		( GLfloat ) ( ( line.m_color >> 8 ) & 0xff ) / 255.f,
+		( GLfloat ) ( ( line.m_color >> 16 ) & 0xff ) / 255.f,
+		( GLfloat ) ( ( line.m_color >> 24 ) & 0xff ) / 255.f,
+		( GLfloat ) ( line.m_color & 0xff ) / 255.f,
+		( GLfloat ) ( ( line.m_color >> 8 ) & 0xff ) / 255.f,
+		( GLfloat ) ( ( line.m_color >> 16 ) & 0xff ) / 255.f,
+		( GLfloat ) ( ( line.m_color >> 24 ) & 0xff ) / 255.f
 	};
 
-	glUseProgram( g_lineProgramID );
+	m_lineShader.use();
 
-	GLuint projectionLocation = glGetUniformLocation( g_lineProgramID, "projection" );
-	glUniformMatrix4fv( projectionLocation, 1, GL_FALSE, glm::value_ptr( g_projection ) );
+	m_lineShader.setMat4( "projection", m_projection );
 
-	glBindVertexArray( g_lineVAO );
-	glBindBuffer( GL_ARRAY_BUFFER, g_lineVBO[0] );
+	glBindVertexArray( m_lineVAO );
+	glBindBuffer( GL_ARRAY_BUFFER, m_lineVBO[0] );
 	glBufferSubData( GL_ARRAY_BUFFER, 0, sizeof( vertices ), vertices );
-	glBindBuffer( GL_ARRAY_BUFFER, g_lineVBO[1] );
+	glBindBuffer( GL_ARRAY_BUFFER, m_lineVBO[1] );
 	glBufferSubData( GL_ARRAY_BUFFER, 0, sizeof( color ), color );
 	glDrawArrays( GL_LINE_STRIP, 0, 2 );
 	glBindVertexArray( 0 );
 }
 
-void addDisplay( const Line& line )
+void Renderer::getDimensions( float & left, float & right, float & bottom, float & top )
 {
-	g_renderLines.push_back( line );
+	left = m_left;
+	right = m_right;
+	bottom = m_bottom;
+	top = m_top;
 }
 
-void getDimensions( float & left, float & right, float & bottom, float & top )
+void Renderer::drawLine( const Vector4& pa, const Vector4& pb, unsigned int color )
 {
-	left = g_left;
-	right = g_right;
-	bottom = g_bottom;
-	top = g_top;
+	m_renderLines.push_back( Line( pa, pb, color ) );
 }
 
-void drawLine( const Vector4& pa, const Vector4& pb, unsigned int color )
-{
-	addDisplay( Line( pa, pb, color ) );
-}
-
-void drawCross( const Vector4& pos, const Real rot, const Real len, unsigned int color )
+void Renderer::drawCross( const Vector4& pos, const Real rot, const Real len, unsigned int color )
 {
 	Vector4 needle( len / 2.f, 0.f );
 
@@ -356,7 +298,7 @@ void drawCross( const Vector4& pos, const Real rot, const Real len, unsigned int
 	drawLine( b, d, color );
 }
 
-void drawArrow( const Vector4& pos, const Vector4& dir, unsigned int color )
+void Renderer::drawArrow( const Vector4& pos, const Vector4& dir, unsigned int color )
 {
 	Vector4 dst; dst.setAdd( pos, dir );
 	drawLine( pos, dst, color );
@@ -371,7 +313,7 @@ void drawArrow( const Vector4& pos, const Vector4& dir, unsigned int color )
 	drawLine( dst, dstToHeadRight, color );
 }
 
-void drawBox( const Vector4& max, const Vector4& min, unsigned int color )
+void Renderer::drawBox( const Vector4& max, const Vector4& min, unsigned int color )
 {
 	Vector4 upperLeft( min( 0 ), max( 1 ) );
 	Vector4 bottomRight( max( 0 ), min( 1 ) );
@@ -382,7 +324,7 @@ void drawBox( const Vector4& max, const Vector4& min, unsigned int color )
 	drawLine( min, bottomRight, color );
 }
 
-void drawCircle( const Vector4& pos, const Real radius, unsigned int color )
+void Renderer::drawCircle( const Vector4& pos, const Real radius, unsigned int color )
 {
 	Real step = 2 * (Real)M_PI * STEP_RENDER_CIRCLE;
 	Real full = ( 2.f + STEP_RENDER_CIRCLE ) * M_PI;
@@ -402,36 +344,35 @@ Text::Text( const std::string& str, const Vector4& pos, const Real scale, unsign
 
 }
 
-void Text::render() const
+void Renderer::renderText( const Text& text ) const
 {
-	glUseProgram( g_txtProgramID );
+	m_textShader.use();
 
-	GLuint projectionLocation = glGetUniformLocation( g_lineProgramID, "projection" );
-	glUniformMatrix4fv( projectionLocation, 1, GL_FALSE, glm::value_ptr( g_projection ) );
+	m_textShader.setMat4( "projection", m_projection );
 
-	GLuint textColorLocation = glGetUniformLocation( g_txtProgramID, "textColor" );
-	glUniform3f( textColorLocation,
-				 (GLfloat)(m_color & 0xff) / 255.f,
-				 (GLfloat)(m_color >> 8 & 0xff) / 255.f,
-				 (GLfloat)(m_color >> 16 & 0xff) / 255.f );
+	m_textShader.setVec3(
+		"textColor",
+		( GLfloat ) ( text.m_color & 0xff ) / 255.f,
+		( GLfloat ) ( text.m_color >> 8 & 0xff ) / 255.f,
+		( GLfloat ) ( text.m_color >> 16 & 0xff ) / 255.f );
 
     glActiveTexture(GL_TEXTURE0);
-    glBindVertexArray(g_txtVAO);
+    glBindVertexArray(m_textVAO);
 
-	Real x = m_pos( 0 );
-	Real y = m_pos( 1 );
+	Real x = text.m_pos( 0 );
+	Real y = text.m_pos( 1 );
 
     // Iterate through all characters
     std::string::const_iterator c;
-    for (c = m_str.begin(); c != m_str.end(); c++)
+    for (c = text.m_str.begin(); c != text.m_str.end(); c++)
 	{
 		Character ch = Characters[*c];
 
-		GLfloat xpos = x + ch.m_bearing( 0 ) * m_scale;
-		GLfloat ypos = y - ( ch.m_size( 1 ) - ch.m_bearing( 1 ) ) * m_scale;
+		GLfloat xpos = x + ch.m_bearing( 0 ) * text.m_scale;
+		GLfloat ypos = y - ( ch.m_size( 1 ) - ch.m_bearing( 1 ) ) * text.m_scale;
 
-		GLfloat w = ch.m_size( 0 ) * m_scale;
-		GLfloat h = ch.m_size( 1 ) * m_scale;
+		GLfloat w = ch.m_size( 0 ) * text.m_scale;
+		GLfloat h = ch.m_size( 1 ) * text.m_scale;
         // Update VBO for each character
         GLfloat vertices[6][4] = {
             { xpos,     ypos + h,   0.0, 0.0 },
@@ -446,19 +387,19 @@ void Text::render() const
         glBindTexture(GL_TEXTURE_2D, ch.m_textureId);
 
         // Update content of VBO memory
-        glBindBuffer(GL_ARRAY_BUFFER, g_txtVBO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_textVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices); 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         // Render quad
         glDrawArrays(GL_TRIANGLES, 0, 6);
         // Now advance cursors for next glyph (note that advance is number of 1/64 pixels)
-        x += (ch.m_advance >> 6) * m_scale; // Bitshift by 6 to get value in pixels (2^6 = 64)
+        x += (ch.m_advance >> 6) * text.m_scale; // Bitshift by 6 to get value in pixels (2^6 = 64)
     }
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void drawText( const std::string& str, const Vector4& pos, const Real scale, unsigned int color )
+void Renderer::drawText( const std::string& str, const Vector4& pos, const Real scale, unsigned int color )
 {
-	g_renderTexts.push_back( Text( str, pos, scale, color ) );
+	m_renderTexts.push_back( Text( str, pos, scale, color ) );
 }
